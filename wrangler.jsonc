@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "student-portfolio-wangjiacong-01",
+  "main": "./cloudflare/worker-entry.js",
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "AUTH_PLATFORM": "password"
+  },
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "migrations_dir": "./drizzle","database_id": "190a3cea-d887-4354-a774-c4924d2a6c7a","database_name": "student-portfolio-wangjiacong-01-db"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "MEDIA_KV","id": "e5c2f1e184ab47b192c5fb68bf730d24"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05
+    }
+  }
+}
