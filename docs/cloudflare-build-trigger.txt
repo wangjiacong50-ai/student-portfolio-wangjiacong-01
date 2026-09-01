@@ -1,2 +1,3 @@
 Trigger Cloudflare production deployment for v1.3.0.
 Retry with official fingerprint step.
+Retry after binding DB and MEDIA_KV.
