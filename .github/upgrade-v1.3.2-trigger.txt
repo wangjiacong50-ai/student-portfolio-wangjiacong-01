@@ -1,3 +1,3 @@
 DEPLOY-V1.3.2
 Requested for the original Worker student-portfolio-wangjiacong-01.
-Retry: baseline trigger allowlist corrected.
+Retry 2: deploy the verified candidate directly from the isolated runner.
