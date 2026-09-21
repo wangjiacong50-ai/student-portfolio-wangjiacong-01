@@ -50,7 +50,9 @@ jobs:
         working-directory: site
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$ORIGINAL_COMMIT"
+          git merge-base --is-ancestor "$ORIGINAL_COMMIT" HEAD
+          git diff --exit-code "$ORIGINAL_COMMIT" HEAD -- . \
+            ':(exclude).github/workflows/upgrade-v1.3.2.yml'
           cp wrangler.jsonc "$RUNNER_TEMP/original-wrangler.jsonc"
           test "$(sha256sum "$RUNNER_TEMP/original-wrangler.jsonc" | awk '{print $1}')" = "$EXPECTED_WRANGLER_SHA256"
           git remote add verified-release https://github.com/q1433031046-ship-it/student-portfolio-cloudflare.git
