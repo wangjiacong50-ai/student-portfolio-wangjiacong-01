@@ -1,0 +1,76 @@
+name: Sync repository source to v1.3.2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/sync-source-v1.3.2-trigger.txt
+
+permissions:
+  contents: write
+
+concurrency:
+  group: student-portfolio-wangjiacong-01-source-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ORIGINAL_COMMIT: 5c9d2032ba309d64c9069c279d876e4cc7cc4429
+      RELEASE_COMMIT: a7f0b7e9b8be4bea692c0e8724856b914421aa43
+      EXPECTED_TREE: 6e4e002043900c317b35f14c76aca42648309551
+      EXPECTED_WRANGLER_SHA256: 66f5eb7cd1e1c490a84875de761e9fb0e1eb913a3a4975f651803520ed29e7bd
+
+    steps:
+      - name: Check out original repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Replace application source with verified formal release
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$ORIGINAL_COMMIT" HEAD
+          git diff --exit-code "$ORIGINAL_COMMIT" HEAD -- . ':(exclude).github'
+          cp wrangler.jsonc "$RUNNER_TEMP/original-wrangler.jsonc"
+          test "$(sha256sum "$RUNNER_TEMP/original-wrangler.jsonc" | awk '{print $1}')" = "$EXPECTED_WRANGLER_SHA256"
+          tar -cf "$RUNNER_TEMP/preserved-github.tar" .github
+
+          git remote add verified-release https://github.com/q1433031046-ship-it/student-portfolio-cloudflare.git
+          git fetch --no-tags verified-release refs/tags/v1.3.2
+          test "$(git rev-parse FETCH_HEAD^{commit})" = "$RELEASE_COMMIT"
+
+          git rm -r --quiet .
+          git archive "$RELEASE_COMMIT" | tar -x
+          cp "$RUNNER_TEMP/original-wrangler.jsonc" wrangler.jsonc
+          git add -A
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+
+          rm -rf .github
+          tar -xf "$RUNNER_TEMP/preserved-github.tar"
+          git add -A
+          git diff --cached --exit-code -- .github
+          test "$(sha256sum wrangler.jsonc | awk '{print $1}')" = "$EXPECTED_WRANGLER_SHA256"
+          node <<'NODE'
+          const { createHash } = require('node:crypto');
+          const { readFileSync } = require('node:fs');
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const upgrade = JSON.parse(readFileSync('deployment/upgrade-prompt.json', 'utf8'));
+          const expected = '6a8800657b8da767edeae0d4c5c6e78d5397dae8ba0f6fb6cd3775dfa021ae4b';
+          const actual = createHash('sha256').update(upgrade.prompt, 'utf8').digest('hex');
+          if (pkg.version !== '1.3.2' || upgrade.promptVersion !== '1.3.2' || upgrade.releaseTag !== 'v1.3.2') {
+            throw new Error('Frozen release metadata is not v1.3.2');
+          }
+          if (upgrade.promptSha256 !== expected || actual !== expected) {
+            throw new Error('upgrade-prompt fingerprint mismatch');
+          }
+          NODE
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Upgrade application source to formal v1.3.2"
+          git push origin HEAD:main
