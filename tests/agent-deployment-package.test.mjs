@@ -3,6 +3,12 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+assert.equal(
+  existsSync("tests/semantic-version.test.mjs"),
+  true,
+  "the focused semantic-version test file must exist before the broader gate runs",
+);
+
 test("ships a machine-readable agent deployment contract", async () => {
   const manifest = JSON.parse(
     await readFile("deployment/agent-manifest.json", "utf8"),
@@ -26,6 +32,16 @@ test("ships a machine-readable agent deployment contract", async () => {
   assert.equal(manifest.authorizationFlow.maximumAutomaticAuthorizationAttempts, 1);
   assert.equal(manifest.authorizationFlow.resumeInterruptedStep, true);
   assert.equal(manifest.authorizationFlow.restartDeploymentAfterAuthorization, false);
+  assert.equal(manifest.trustedReleaseCommand.exactCommand, "/verify-and-tag vX.Y.Z[-PRERELEASE]");
+  assert.equal(
+    manifest.trustedReleaseCommand.pullRequestRequirements.head,
+    "same-repository release/vX.Y.Z[-PRERELEASE]",
+  );
+  assert.equal(manifest.trustedReleaseCommand.actor, "repository-owner-only");
+  assert.equal(manifest.trustedReleaseCommand.reusableGate, ".github/workflows/release-verify.yml");
+  assert.equal(manifest.trustedReleaseCommand.bypassExistingGates, false);
+  assert.equal(manifest.trustedReleaseCommand.cloudflareAccess, false);
+  assert.equal(manifest.trustedReleaseCommand.productionDeployment, false);
   assert.equal(manifest.access.visitorSessionHours, 24);
   assert.equal(manifest.access.slidingSession, false);
   assert.equal(manifest.access.intermediateRoute, "/access");
@@ -46,14 +62,16 @@ test("ships a machine-readable agent deployment contract", async () => {
   assert.ok(manifest.liveTests.length >= 10);
 });
 
-test("keeps package, lockfile and template release versions synchronized", async () => {
+test("keeps package and candidate versions synchronized without inventing a release tag", async () => {
   const [packageJson, packageLock, templateVersion] = await Promise.all([
     readFile("package.json", "utf8").then(JSON.parse),
     readFile("package-lock.json", "utf8").then(JSON.parse),
-    readFile("deployment/template-version.json", "utf8").then(JSON.parse),
+    readFile("deployment/local-candidate.json", "utf8").then(JSON.parse),
   ]);
 
-  assert.equal(packageJson.version, "1.3.0");
+  assert.equal(packageJson.version, "1.3.1-b");
+  assert.equal(templateVersion.status, "unreleased");
+  assert.equal(templateVersion.releaseTag, null);
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[""].version, packageJson.version);
   assert.equal(templateVersion.version, packageJson.version);
@@ -114,10 +132,14 @@ test("runs the complete production-safe gate for every main pull request", async
 });
 
 test("tags only an explicitly verified release candidate from the protected main workflow", async () => {
-  const workflow = await readFile(".github/workflows/release-verify.yml", "utf8");
+  const workflow = (await readFile(
+    ".github/workflows/release-verify.yml",
+    "utf8",
+  )).replace(/\r\n/gu, "\n");
   const [verificationJobs, tagJob = ""] = workflow.split(/\n  tag-release:\n/u);
 
   assert.match(workflow, /push:\s*\n\s*branches: \[main\]/u);
+  assert.match(workflow, /workflow_call:\s*\n\s*inputs:/u);
   assert.match(workflow, /workflow_dispatch:\s*\n\s*inputs:/u);
   for (const input of ["candidate_sha", "base_main_sha", "confirm_version"]) {
     assert.match(
@@ -159,7 +181,7 @@ test("tags only an explicitly verified release candidate from the protected main
   assert.match(workflow, /runs-on: macos-latest/u);
 
   assert.match(tagJob, /needs:\s*\[release-verify, macos-webkit\]/u);
-  assert.match(tagJob, /github\.event_name == 'workflow_dispatch'/u);
+  assert.match(tagJob, /inputs\.confirm_version != ''/u);
   assert.match(tagJob, /github\.ref == 'refs\/heads\/main'/u);
   assert.match(tagJob, /permissions:\s*\n\s*contents: write/u);
   assert.match(tagJob, /persist-credentials: true/u);
@@ -178,6 +200,41 @@ test("tags only an explicitly verified release candidate from the protected main
   assert.doesNotMatch(workflow, /expectedVersion/u);
   assert.doesNotMatch(tagJob, /needs\.[^.]+\.outputs/u);
   assert.doesNotMatch(tagJob, /--force|-f\s+["']?\$RELEASE_TAG/u);
+});
+
+test("lets only the repository owner invoke the unchanged release gate from a release PR comment", async () => {
+  const [commandWorkflow, releaseWorkflow, agents, template] = await Promise.all([
+    readFile(".github/workflows/release-command.yml", "utf8"),
+    readFile(".github/workflows/release-verify.yml", "utf8"),
+    readFile("AGENTS.md", "utf8"),
+    readFile("deployment/template-version.json", "utf8").then(JSON.parse),
+  ]);
+
+  assert.match(commandWorkflow, /issue_comment:\s*\n\s*types: \[created\]/u);
+  assert.match(commandWorkflow, /github\.actor == github\.repository_owner/u);
+  assert.match(commandWorkflow, /Only the repository owner can request a release/u);
+  assert.match(commandWorkflow, /command_prefix="\/verify-and-tag "/u);
+  assert.match(commandWorkflow, /node shared\/semantic-version\.mjs parse/u);
+  assert.match(commandWorkflow, /pulls\/\$\{PR_NUMBER\}/u);
+  assert.match(commandWorkflow, /git\/ref\/heads\/main/u);
+  assert.match(commandWorkflow, /base_ref.*main/su);
+  assert.match(commandWorkflow, /head_ref.*release\/v\$\{confirm_version\}/su);
+  assert.match(commandWorkflow, /pr_state.*open/su);
+  assert.match(commandWorkflow, /pr_draft.*false/su);
+  assert.match(commandWorkflow, /uses: \.\/\.github\/workflows\/release-verify\.yml/u);
+  for (const input of ["candidate_sha", "base_main_sha", "confirm_version"]) {
+    const expectedInput = `${input}: ` + "${{ needs.resolve-release-request.outputs." + input + " }}";
+    assert.ok(commandWorkflow.includes(expectedInput));
+  }
+  assert.doesNotMatch(commandWorkflow, /actions:\s*write/u);
+  assert.doesNotMatch(commandWorkflow, /wrangler|cloudflare:deploy|git tag|refs\/tags\//u);
+  assert.match(releaseWorkflow, /workflow_call:\s*\n\s*inputs:/u);
+  const expectedContract = "The current release contract is version `"
+    + template.version
+    + "`, source ref `refs/tags/"
+    + template.releaseTag
+    + "`.";
+  assert.ok(agents.includes(expectedContract));
 });
 
 test("exposes a public Deploy to Cloudflare template with storage bindings", async () => {
