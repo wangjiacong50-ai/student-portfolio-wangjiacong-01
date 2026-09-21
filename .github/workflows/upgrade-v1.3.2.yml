@@ -84,11 +84,10 @@ jobs:
             throw new Error('upgrade-prompt fingerprint mismatch');
           }
           NODE
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Prepare verified upgrade to formal v1.3.2"
-          git fetch origin refs/heads/codex/upgrade-v1.3.2:refs/remotes/origin/codex/upgrade-v1.3.2 || true
-          git push --force-with-lease origin HEAD:refs/heads/codex/upgrade-v1.3.2
+          # Keep the verified candidate in this isolated runner workspace.
+          # GitHub's ephemeral Actions token cannot update workflow files that
+          # are present in the signed release tree; deployment does not require
+          # a remote candidate branch.
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
