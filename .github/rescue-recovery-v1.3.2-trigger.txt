@@ -1,3 +1,0 @@
-RESCUE-V1.3.2
-Install a one-time recovery verifier for the original D1 only.
-Do not change portfolio content, media, password, or program confirmation.
