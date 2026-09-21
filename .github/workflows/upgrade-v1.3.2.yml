@@ -81,6 +81,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Prepare verified upgrade to formal v1.3.2"
+          git fetch origin refs/heads/codex/upgrade-v1.3.2:refs/remotes/origin/codex/upgrade-v1.3.2 || true
           git push --force-with-lease origin HEAD:refs/heads/codex/upgrade-v1.3.2
 
       - name: Set up Node.js
